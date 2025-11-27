@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SewaVault — Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">SewaVault</div>
+    <div id="userLabel"></div>
+    <button id="logoutBtn" class="btn-ghost">Logout</button>
+  </div>
+
+  <div class="container">
+    <div class="cards-grid">
+      <div class="card">
+        <h3 id="totalSewadars">—</h3>
+        <p>Total Sewadars</p>
+      </div>
+      <div class="card">
+        <h3 id="activeCount">—</h3>
+        <p>Active</p>
+      </div>
+      <div class="card">
+        <h3 id="inactiveCount">—</h3>
+        <p>Inactive</p>
+      </div>
+      <div class="card">
+        <h3 id="todayAttendance">—</h3>
+        <p>Today's Attendance</p>
+      </div>
+    </div>
+
+    <div class="nav-buttons">
+      <a href="sewadars.html" class="btn-primary">Manage Sewadars</a>
+      <a href="attendance.html" class="btn">Attendance</a>
+      <a href="tokens.html" class="btn">Tokens</a>
+      <a href="#" class="btn">Reports</a>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuthOrRedirect, getSession, logout } from './assets/js/auth.js';
+    import { supabase } from './assets/js/supabase-client.js';
+
+    requireAuthOrRedirect();
+    const s = getSession();
+    document.getElementById('userLabel').textContent = s?.label || '';
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      logout();
+    });
+
+    // quick stats
+    async function loadStats() {
+      const { data: sewadars } = await supabase.from('sewadars').select('gr_no, status');
+      document.getElementById('totalSewadars').textContent = sewadars?.length ?? 0;
+      document.getElementById('activeCount').textContent = sewadars?.filter(s => s.status === 'active').length ?? 0;
+      document.getElementById('inactiveCount').textContent = sewadars?.filter(s => s.status === 'inactive').length ?? 0;
+      // simple today's attendance
+      const today = new Date().toISOString().slice(0,10);
+      const { data: att } = await supabase.from('attendance').select('*').eq('attendance_date', today);
+      document.getElementById('todayAttendance').textContent = att?.length ?? 0;
+    }
+    loadStats();
+  </script>
+</body>
+</html>

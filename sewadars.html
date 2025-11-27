@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SewaVault — Sewadars</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <link href="https://unpkg.com/tabulator-tables@5.5.1/dist/css/tabulator.min.css" rel="stylesheet">
+  <style>
+    /* small overrides for drawer */
+    .detail-drawer { position: fixed; right: 0; top: 0; height: 100vh; width: 420px; background: #fff; box-shadow: -8px 0 24px rgba(0,0,0,.08); transform: translateX(100%); transition: transform .22s ease; z-index: 80; padding: 18px; overflow:auto }
+    .detail-drawer.open { transform: translateX(0); }
+    .table-wrap { margin: 18px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid #eee; background:#fff }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">SewaVault</div>
+    <div>
+      <button id="refreshBtn" class="btn">Refresh</button>
+      <button id="addBtn" class="btn-primary">Add Sewadar</button>
+      <button id="exportBtn" class="btn">Export CSV</button>
+      <button id="printBtn" class="btn">Print</button>
+      <button id="logoutBtn" class="btn-ghost">Logout</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <div id="sewadars-table"></div>
+  </div>
+
+  <div id="drawer" class="detail-drawer" aria-hidden="true">
+    <h3 id="drawerTitle">Sewadar Details</h3>
+    <form id="drawerForm">
+      <label>GR No (required)
+        <input id="f_gr_no" name="gr_no" required />
+      </label>
+
+      <label>Name (required)
+        <input id="f_name" name="name" required />
+      </label>
+
+      <label>Phone 1
+        <input id="f_phone1" name="phone1" inputmode="numeric" />
+      </label>
+
+      <label>Phone 2
+        <input id="f_phone2" name="phone2" inputmode="numeric" />
+      </label>
+
+      <label>Whatsapp Number
+        <input id="f_whatsapp_number" name="whatsapp_number" inputmode="numeric" />
+      </label>
+
+      <label>Status
+        <select id="f_status">
+          <option value="active">active</option>
+          <option value="inactive">inactive</option>
+        </select>
+      </label>
+
+      <label>Date of Birth
+        <input id="f_date_of_birth" type="date" name="date_of_birth" />
+      </label>
+
+      <label>Age
+        <input id="f_age" name="age" readonly />
+      </label>
+
+      <label>Category
+        <select id="f_category">
+          <option value="local">local</option>
+          <option value="outstation">outstation</option>
+        </select>
+      </label>
+
+      <label>Sewa Duty
+        <select id="f_sewa_duty">
+          <option>Luggage</option>
+          <option>Mobile Counter 1</option>
+          <option>Mobile Counter 2</option>
+          <option>Mobile Counter 3</option>
+          <option>Mobile Counter 4</option>
+          <option>Mobile Counter 5</option>
+          <option>Admin</option>
+        </select>
+      </label>
+
+      <!-- other fields (addresses, emergency, occupation, office, email, date deceased) -->
+      <label>Current Address
+        <textarea id="f_current_address"></textarea>
+      </label>
+
+      <label>Permanent Address
+        <textarea id="f_permanent_address"></textarea>
+      </label>
+
+      <label>Emergency Contact Person
+        <input id="f_emergency_contact_person" />
+      </label>
+
+      <label>Emergency Contact Number
+        <input id="f_emergency_contact_number" inputmode="numeric" />
+      </label>
+
+      <label>Occupation
+        <input id="f_occupation" />
+      </label>
+
+      <label>Office/Business Address
+        <textarea id="f_office_or_business_address"></textarea>
+      </label>
+
+      <label>Office Phone
+        <input id="f_office_phone" inputmode="numeric" />
+      </label>
+
+      <label>Email
+        <input id="f_email" type="email" />
+      </label>
+
+      <label>Date Deceased
+        <input id="f_date_deceased" type="date" />
+      </label>
+
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="saveBtn" class="btn-primary" type="button">Save</button>
+        <button id="deleteBtn" class="btn-ghost" type="button">Delete</button>
+        <button id="closeBtn" class="btn" type="button">Close</button>
+      </div>
+    </form>
+  </div>
+
+  <script type="module">
+    import { requireAuthOrRedirect, logout } from './assets/js/auth.js';
+    import { supabase } from './assets/js/supabase-client.js';
+    import Tabulator from 'https://unpkg.com/tabulator-tables@5.5.1/dist/js/tabulator_min.js';
+
+    requireAuthOrRedirect();
+
+    // util: calculate age from DOB (on jan 1 logic is automatic because we compute from today)
+    function calcAge(dob) {
+      if (!dob) return "";
+      const b = new Date(dob);
+      const today = new Date();
+      let age = today.getFullYear() - b.getFullYear();
+      const m = today.getMonth() - b.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < b.getDate())) age--;
+      return age;
+    }
+
+    // validate numeric input (digits only)
+    function sanitizePhone(v) {
+      if (!v) return null;
+      return v.toString().replace(/\D/g, '');
+    }
+
+    // load data and build Tabulator
+    let table;
+    async function loadTable() {
+      const { data, error } = await supabase.from('sewadars').select('*');
+      if (error) {
+        alert("Error loading sewadars: " + error.message);
+        return;
+      }
+
+      const cols = [
+        { title: "GR No", field: "gr_no", width:160, frozen:true },
+        { title: "Name", field: "name", width:220, frozen:true, headerFilter:"input" },
+        { title: "Phone1", field: "phone1", headerFilter:"input", editor:"input" },
+        { title: "Status", field: "status", editor:"select", editorParams:{values:{"active":"active","inactive":"inactive"}}, headerFilter:"select", headerFilterParams:{values:{"":"All","active":"active","inactive":"inactive"}} },
+        { title: "Category", field: "category", editor:"select", editorParams:{values:{"local":"local","outstation":"outstation"}}, headerFilter:"select" },
+        { title: "Sewa Duty", field: "sewa_duty", editor:"select", editorParams:{values:["Luggage","Mobile Counter 1","Mobile Counter 2","Mobile Counter 3","Mobile Counter 4","Mobile Counter 5","Admin"]}, headerFilter:"select" },
+        { title: "DOB", field: "date_of_birth", editor:"input", headerFilter:"input" },
+        { title: "Age", field: "age", hozAlign:"center", formatter:function(cell){ const dob = cell.getData().date_of_birth; return calcAge(dob); } },
+        { title: "Email", field: "email", headerFilter:"input" },
+        // keep it short; editable inline for the rest using details drawer
+        { title: "Actions", field: "actions", formatter: function(cell, formatterParams){
+            return "<button class='open-btn'>Open</button>";
+          }, width:120, hozAlign:"center", cellClick:function(e, cell){
+            openDrawer(cell.getData());
+          }
+        }
+      ];
+
+      if (table) {
+        table.replaceData(data);
+        return;
+      }
+
+      table = new Tabulator("#sewadars-table", {
+        data,
+        layout:"fitColumns",
+        pagination:"local",
+        paginationSize:25,
+        columns: cols,
+        movableColumns:true,
+        index:"gr_no",
+        height:"70vh",
+        rowClick:function(e, row){ /* optional double action */ },
+        cellEdited: async function(cell) {
+          // updates when inline edit occurs
+          const row = cell.getRow().getData();
+          // sanitize phone fields
+          row.phone1 = sanitizePhone(row.phone1);
+          row.phone2 = sanitizePhone(row.phone2);
+          row.whatsapp_number = sanitizePhone(row.whatsapp_number);
+          row.emergency_contact_number = sanitizePhone(row.emergency_contact_number);
+          row.office_phone = sanitizePhone(row.office_phone);
+
+          // update supabase
+          const gr = row.gr_no;
+          const updates = { ...row };
+          delete updates.gr_no;
+          const { error } = await supabase.from('sewadars').upsert([{ gr_no: gr, ...updates }], { onConflict: 'gr_no' });
+          if (error) {
+            alert("Save error: " + error.message);
+          }
+        }
+      });
+    }
+
+    // drawer controls
+    const drawer = document.getElementById('drawer');
+    function openDrawer(data = null) {
+      document.getElementById('drawerForm').reset();
+      if (data) {
+        document.getElementById('drawerTitle').textContent = `Sewadar — ${data.name} (${data.gr_no})`;
+        // populate fields
+        for (const key of Object.keys(data)) {
+          const el = document.getElementById('f_' + key);
+          if (el) el.value = data[key] ?? '';
+        }
+        // age calc
+        document.getElementById('f_age').value = calcAge(data.date_of_birth);
+        document.getElementById('f_gr_no').disabled = true;
+      } else {
+        document.getElementById('drawerTitle').textContent = 'New Sewadar';
+        document.getElementById('f_gr_no').disabled = false;
+      }
+      drawer.classList.add('open');
+      drawer.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeDrawer() {
+      drawer.classList.remove('open');
+      drawer.setAttribute('aria-hidden', 'true');
+    }
+
+    // save from drawer
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+      const form = document.getElementById('drawerForm');
+      const formData = new FormData(form);
+      const obj = {};
+      for (const [k,v] of formData.entries()) {
+        obj[k] = v ? v.trim() : null;
+      }
+      // required checks
+      if (!obj.gr_no || !obj.name) {
+        alert("GR No and Name are required.");
+        return;
+      }
+      // sanitize numbers
+      obj.phone1 = sanitizePhone(obj.phone1);
+      obj.phone2 = sanitizePhone(obj.phone2);
+      obj.whatsapp_number = sanitizePhone(obj.whatsapp_number);
+      obj.emergency_contact_number = sanitizePhone(obj.emergency_contact_number);
+      obj.office_phone = sanitizePhone(obj.office_phone);
+
+      // if DOB provided, allow age calculation but not stored necessarily
+      if (!obj.status) obj.status = 'active';
+      // upsert
+      const { error } = await supabase.from('sewadars').upsert([obj], { onConflict: 'gr_no' });
+      if (error) {
+        alert("Save failed: " + error.message);
+      } else {
+        await loadTable();
+        closeDrawer();
+      }
+    });
+
+    // delete
+    document.getElementById('deleteBtn').addEventListener('click', async () => {
+      const gr = document.getElementById('f_gr_no').value;
+      if (!gr) return alert("No GR No selected");
+      if (!confirm(`Delete ${gr}? This cannot be undone`)) return;
+      const { error } = await supabase.from('sewadars').delete().eq('gr_no', gr);
+      if (error) return alert("Delete failed: " + error.message);
+      await loadTable();
+      closeDrawer();
+    });
+
+    document.getElementById('closeBtn').addEventListener('click', closeDrawer);
+    document.getElementById('logoutBtn').addEventListener('click', () => { logout(); });
+
+    document.getElementById('addBtn').addEventListener('click', () => openDrawer(null));
+    document.getElementById('refreshBtn').addEventListener('click', loadTable);
+
+    // export csv
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      if (!table) return;
+      table.download("csv", "sewadars.csv");
+    });
+
+    // print filtered rows
+    document.getElementById('printBtn').addEventListener('click', () => {
+      // create printable html of current filtered data
+      const rows = table.getData();
+      let html = `<html><head><title>Print Sewadars</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:18px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px;text-align:left}</style></head><body>`;
+      html += `<h2>Sewadars — Print View</h2>`;
+      html += `<table><thead><tr>`;
+      const headers = ['GR No','Name','Phone1','Status','Category','Sewa Duty','DOB','Age','Email'];
+      headers.forEach(h => html += `<th>${h}</th>`);
+      html += `</tr></thead><tbody>`;
+      rows.forEach(r => {
+        html += `<tr>`;
+        html += `<td>${r.gr_no ?? ''}</td>`;
+        html += `<td>${r.name ?? ''}</td>`;
+        html += `<td>${r.phone1 ?? ''}</td>`;
+        html += `<td>${r.status ?? ''}</td>`;
+        html += `<td>${r.category ?? ''}</td>`;
+        html += `<td>${r.sewa_duty ?? ''}</td>`;
+        html += `<td>${r.date_of_birth ?? ''}</td>`;
+        html += `<td>${calcAge(r.date_of_birth) ?? ''}</td>`;
+        html += `<td>${r.email ?? ''}</td>`;
+        html += `</tr>`;
+      });
+      html += `</tbody></table></body></html>`;
+      const w = window.open("", "_blank");
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      w.print();
+    });
+
+    // initial load
+    loadTable();
+  </script>
+</body>
+</html>
