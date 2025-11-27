@@ -337,5 +337,22 @@
     // initial load
     loadTable();
   </script>
+    <!-- Tabulator (UI table) -->
+  <script src="https://unpkg.com/tabulator-tables@5.5.1/dist/js/tabulator_min.js"></script>
+
+  <!-- App scripts (as ES modules) -->
+  <script type="module">
+    import { requireAuthOrRedirect, logout } from './assets/js/auth.js';
+    import { supabase } from './assets/js/supabase-client.js';
+    import { initSewadarsPage } from './assets/js/sewadars.js';
+
+    // ensure auth
+    requireAuthOrRedirect();
+
+    // call initializer which should attach handlers, load table etc.
+    initSewadarsPage({ supabase, logout });
+  </script>
+
 </body>
+
 </html>
